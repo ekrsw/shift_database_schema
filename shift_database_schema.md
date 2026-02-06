@@ -1,4 +1,4 @@
-# my_database スキーマ定義書 v6
+# my_database スキーマ定義書 v7
 
 ## 概要
 
@@ -314,7 +314,7 @@ ORDER BY g.id, e.id;
 | external_id | varchar(100) | YES | - | 外部ツール上のID |
 | is_active | boolean | YES | true | 有効フラグ |
 
-**制約**: PK(id), FK(employee_id → employees.id), FK(external_tool_id → external_tools.id)
+**制約**: PK(id), FK(employee_id → employees.id), FK(external_tool_id → external_tools.id), UNIQUE(employee_id, external_tool_id)
 
 ---
 
@@ -355,3 +355,4 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 | v4 | 2026-01-27 | employees.hire_dateをassignment_dateにリネーム（CSC配属日に変更） |
 | v5 | 2026-01-27 | shifts.is_remote追加（テレワークフラグ） |
 | v6 | 2026-02-05 | employee_name_history（従業員氏名履歴）テーブルを追加。EXCLUDE制約による期間重複禁止を含む。テーブル一覧のレコード数を最新化 |
+| v7 | 2026-02-06 | employee_external_accountsに複合ユニーク制約UNIQUE(employee_id, external_tool_id)を追記 |
