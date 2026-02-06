@@ -106,17 +106,17 @@ erDiagram
 
 ## テーブル一覧
 
-| テーブル名 | 説明 | レコード数 |
-|-----------|------|-----------|
-| groups | グループマスタ | 3 |
-| employees | 従業員マスタ | 176 |
-| shifts | シフトデータ | 46,552 |
-| positions | 役職マスタ | 2 |
-| function_roles | 機能役割マスタ | 2 |
-| employee_function_roles | 従業員機能役割 | 167 |
-| employee_name_history | 従業員氏名履歴 | 171 |
-| external_tools | 外部ツールマスタ | 0 |
-| employee_external_accounts | 従業員外部アカウント | 0 |
+| テーブル名 | 説明 |
+|-----------|------|
+| groups | グループマスタ |
+| employees | 従業員マスタ |
+| shifts | シフトデータ |
+| positions | 役職マスタ |
+| function_roles | 機能役割マスタ |
+| employee_function_roles | 従業員機能役割 |
+| employee_name_history | 従業員氏名履歴 |
+| external_tools | 外部ツールマスタ |
+| employee_external_accounts | 従業員外部アカウント |
 
 ---
 
@@ -355,4 +355,4 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 | v4 | 2026-01-27 | employees.hire_dateをassignment_dateにリネーム（CSC配属日に変更） |
 | v5 | 2026-01-27 | shifts.is_remote追加（テレワークフラグ） |
 | v6 | 2026-02-05 | employee_name_history（従業員氏名履歴）テーブルを追加。EXCLUDE制約による期間重複禁止を含む。テーブル一覧のレコード数を最新化 |
-| v7 | 2026-02-06 | employee_external_accountsに複合ユニーク制約UNIQUE(employee_id, external_tool_id)を追記 |
+| v7 | 2026-02-06 | employee_external_accountsに複合ユニーク制約UNIQUE(employee_id, external_tool_id)を追記。テーブル一覧からレコード数カラムを削除 |
