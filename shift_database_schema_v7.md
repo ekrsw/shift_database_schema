@@ -29,7 +29,6 @@ erDiagram
         varchar name
         varchar name_kana
         integer group_id FK
-        boolean is_sv "(廃止予定)"
         integer position_id FK
         date assignment_date
         date termination_date
@@ -115,7 +114,7 @@ erDiagram
 | shifts | シフトデータ | 46,552 |
 | positions | 役職マスタ | 2 |
 | function_roles | 機能役割マスタ | 3 |
-| employee_function_roles | 従業員機能役割 | ※移行後に更新 |
+| employee_function_roles | 従業員機能役割 | 189 |
 | employee_name_history | 従業員氏名履歴 | 171 |
 | external_tools | 外部ツールマスタ | 0 |
 | employee_external_accounts | 従業員外部アカウント | 0 |
@@ -147,17 +146,11 @@ erDiagram
 | name | varchar(100) | NO | - | 従業員名 |
 | name_kana | varchar(100) | YES | - | 従業員名（カナ） |
 | group_id | integer | YES | - | 所属グループID |
-| is_sv | boolean | YES | false | SVフラグ **（廃止予定：employee_function_rolesに移行）** |
 | position_id | integer | YES | - | 役職ID |
 | assignment_date | date | YES | - | CSC配属日 |
 | termination_date | date | YES | - | 退職日（在籍中はNULL） |
 
 **制約**: PK(id), FK(group_id → groups.id), FK(position_id → positions.id)
-
-**is_sv廃止について**:
-- SV管理は `employee_function_roles` テーブルに移行（`function_roles.role_code = 'SV'` で管理）
-- 移行完了後、`is_sv` カラムを削除予定
-- 移行期間中は `is_sv` と `employee_function_roles` の両方にデータが存在する
 
 **在籍者抽出クエリ例**:
 ```sql
@@ -312,6 +305,17 @@ FOR EACH ROW
 EXECUTE FUNCTION set_efr_role_type();
 ```
 
+**SV一覧クエリ例**:
+```sql
+SELECT e.id, e.name, g.name AS group_name
+FROM employees e
+JOIN employee_function_roles efr ON e.id = efr.employee_id AND efr.end_date IS NULL
+JOIN function_roles fr ON efr.function_role_id = fr.id
+LEFT JOIN groups g ON e.group_id = g.id
+WHERE fr.role_code = 'SV'
+ORDER BY g.id, e.id
+```
+
 ---
 
 ### 7. employee_name_history（従業員氏名履歴）
@@ -399,90 +403,6 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 
 ---
 
-## DDL（v7 変更分）
-
-### function_roles への role_type 追加
-
-```sql
--- role_type カラムの追加
-ALTER TABLE function_roles 
-  ADD COLUMN role_type VARCHAR(20) NOT NULL DEFAULT 'FUNCTION';
-
--- 既存データの更新（受付・二次対応はデフォルトの FUNCTION のまま）
-
--- SV レコードの追加
-INSERT INTO function_roles (role_code, role_name, role_type, is_active)
-VALUES ('SV', 'SV', 'AUTHORITY', true);
-```
-
-### employee_function_roles への role_type 追加と制約
-
-```sql
--- role_type カラムの追加
-ALTER TABLE employee_function_roles 
-  ADD COLUMN role_type VARCHAR(20) NOT NULL DEFAULT 'FUNCTION';
-
--- 既存データに role_type を反映
-UPDATE employee_function_roles efr
-SET role_type = fr.role_type
-FROM function_roles fr
-WHERE efr.function_role_id = fr.id;
-
--- カテゴリ重複防止の部分ユニークインデックス
-CREATE UNIQUE INDEX idx_efr_one_per_role_type
-ON employee_function_roles (employee_id, role_type)
-WHERE end_date IS NULL;
-```
-
-### role_type 自動設定トリガー
-
-```sql
-CREATE OR REPLACE FUNCTION set_efr_role_type()
-RETURNS TRIGGER AS $$
-BEGIN
-  SELECT role_type INTO NEW.role_type
-  FROM function_roles
-  WHERE id = NEW.function_role_id;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_efr_set_role_type
-BEFORE INSERT OR UPDATE OF function_role_id
-ON employee_function_roles
-FOR EACH ROW
-EXECUTE FUNCTION set_efr_role_type();
-```
-
-### employees.is_sv からのデータ移行
-
-```sql
--- is_sv = true の従業員を employee_function_roles に移行
-INSERT INTO employee_function_roles (employee_id, function_role_id, role_type, is_primary, start_date)
-SELECT 
-  e.id,
-  (SELECT id FROM function_roles WHERE role_code = 'SV'),
-  'AUTHORITY',
-  false,
-  COALESCE(e.assignment_date, CURRENT_DATE)
-FROM employees e
-WHERE e.is_sv = true
-  AND NOT EXISTS (
-    SELECT 1 FROM employee_function_roles efr
-    JOIN function_roles fr ON efr.function_role_id = fr.id
-    WHERE efr.employee_id = e.id AND fr.role_code = 'SV' AND efr.end_date IS NULL
-  );
-```
-
-### employees.is_sv の廃止（移行完了後に実施）
-
-```sql
--- 移行完了・検証後に実行
-ALTER TABLE employees DROP COLUMN is_sv;
-```
-
----
-
 ## 変更履歴
 
 | バージョン | 日付 | 変更内容 |
@@ -493,4 +413,4 @@ ALTER TABLE employees DROP COLUMN is_sv;
 | v4 | 2026-01-27 | employees.hire_dateをassignment_dateにリネーム（CSC配属日に変更） |
 | v5 | 2026-01-27 | shifts.is_remote追加（テレワークフラグ） |
 | v6 | 2026-02-05 | employee_name_history（従業員氏名履歴）テーブルを追加。EXCLUDE制約による期間重複禁止を含む。テーブル一覧のレコード数を最新化 |
-| v7 | 2026-02-07 | SV管理をfunction_rolesに統合。function_roles.role_type追加（FUNCTION/AUTHORITY分類）。employee_function_roles.role_type追加（非正規化）とカテゴリ重複防止制約。role_type自動設定トリガー追加。employees.is_svを廃止予定に変更 |
+| v7 | 2026-02-07 | SV管理をfunction_rolesに統合。function_roles.role_type追加（FUNCTION/AUTHORITY分類）。employee_function_roles.role_type追加（非正規化）とカテゴリ重複防止制約。role_type自動設定トリガー追加。employees.is_svを削除 |
