@@ -81,10 +81,8 @@ erDiagram
     employee_name_history {
         integer id PK
         integer employee_id FK
-        varchar last_name
-        varchar first_name
-        varchar last_name_kana
-        varchar first_name_kana
+        varchar name
+        varchar name_kana
         date valid_from
         date valid_to
         boolean is_current
@@ -298,10 +296,8 @@ ORDER BY g.id, e.id
 |---------|---------|------|-----------|------|
 | id | integer | NO | auto_increment | 主キー |
 | employee_id | integer | YES | - | 従業員ID |
-| last_name | varchar(50) | NO | - | 姓 |
-| first_name | varchar(50) | NO | - | 名 |
-| last_name_kana | varchar(100) | YES | - | 姓（カナ） |
-| first_name_kana | varchar(100) | YES | - | 名（カナ） |
+| name | varchar(100) | NO | - | 従業員名 |
+| name_kana | varchar(100) | YES | - | 従業員名（カナ） |
 | valid_from | date | NO | - | 有効開始日 |
 | valid_to | date | YES | - | 有効終了日（現行はNULL） |
 | is_current | boolean | YES | false | 現行氏名フラグ |
@@ -383,4 +379,4 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 | v5 | 2026-01-27 | shifts.is_remote追加（テレワークフラグ） |
 | v6 | 2026-02-05 | employee_name_history（従業員氏名履歴）テーブルを追加。EXCLUDE制約による期間重複禁止を含む。テーブル一覧のレコード数を最新化 |
 | v7 | 2026-02-07 | SV管理をfunction_rolesに統合。function_roles.role_type追加（FUNCTION/AUTHORITY分類）。employee_function_roles.role_type追加（非正規化）とカテゴリ重複防止制約。role_type自動設定トリガー追加。employees.is_svを削除 |
-| v8 | 2026-02-16 | positionsマスターをfunction_rolesに統合。role_typeにPOSITION追加（FUNCTION/AUTHORITY/POSITIONの3分類）。employees.position_idを削除。positionsテーブルを廃止 |
+| v8 | 2026-02-16 | positionsマスターをfunction_rolesに統合。role_typeにPOSITION追加（FUNCTION/AUTHORITY/POSITIONの3分類）。employees.position_idを削除。positionsテーブルを廃止。employee_name_historyのカラムをemployeesと整合（name/name_kanaに統一） |
