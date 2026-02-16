@@ -252,6 +252,7 @@ ORDER BY g.id, e.id;
 | 二次対応を持つ人にSVを追加 | **許可** | `FUNCTION` + `AUTHORITY`、重複なし |
 | SVを持つ人にさらにSVを追加 | **ブロック** | `AUTHORITY` が重複 |
 | 課長を持つ人に受付を追加 | **許可** | `POSITION` + `FUNCTION`、重複なし |
+| 課長を持つ人にSVを追加 | **許可** | `POSITION` + `AUTHORITY`、重複なし |
 | 課長を持つ人に副部長を追加 | **ブロック** | 両方 `role_type='POSITION'`、重複 |
 
 **トリガー: role_type 自動設定**:
