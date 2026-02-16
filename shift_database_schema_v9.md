@@ -1,8 +1,8 @@
-# my_database スキーマ定義書 v8
+# my_database スキーマ定義書 v9
 
 ## 概要
 
-シフト管理システム用のPostgreSQLデータベース。従業員、グループ、シフト情報に加え、機能役割（役職含む）・外部ツール連携を管理する。
+シフト管理システム用のPostgreSQLデータベース。従業員、グループ、シフト情報に加え、機能役割（役職含む）・外部ツール連携を管理する。シフト変更時の履歴をトリガーで自動記録し、変更前後の比較・復元を可能にする。
 
 ## ER図
 
@@ -17,6 +17,7 @@ erDiagram
     employees ||--o{ employee_function_roles : has
     function_roles ||--o{ employee_function_roles : assigned
     employees ||--o{ employee_name_history : has
+    shifts ||--o{ shift_change_history : has
 
     groups {
         integer id PK
@@ -89,6 +90,23 @@ erDiagram
         varchar note
         timestamp created_at
     }
+
+    shift_change_history {
+        integer id PK
+        integer shift_id FK
+        integer employee_id
+        date shift_date
+        varchar shift_code
+        time start_time
+        time end_time
+        boolean is_holiday
+        boolean is_paid_leave
+        boolean is_remote
+        varchar change_type
+        integer version
+        timestamp changed_at
+        varchar note
+    }
 ```
 
 ---
@@ -103,6 +121,7 @@ erDiagram
 | function_roles | 機能役割マスタ（役職含む） | 5 |
 | employee_function_roles | 従業員機能役割（役職含む） | 191 |
 | employee_name_history | 従業員氏名履歴 | 171 |
+| shift_change_history | シフト変更履歴 | 0 |
 | external_tools | 外部ツールマスタ | 0 |
 | employee_external_accounts | 従業員外部アカウント | 0 |
 
@@ -312,7 +331,119 @@ ORDER BY g.id, e.id
 
 ---
 
-### 7. external_tools（外部ツールマスタ）
+### 7. shift_change_history（シフト変更履歴）
+
+シフトデータの変更履歴を管理する。`shifts` テーブルへの UPDATE / DELETE 時にトリガーで変更前の全カラム値を自動保存し、変更前後の比較・復元を可能にする。
+
+| カラム名 | データ型 | NULL | デフォルト | 説明 |
+|---------|---------|------|-----------|------|
+| id | integer | NO | auto_increment | 主キー |
+| shift_id | integer | NO | - | 対象シフトID |
+| employee_id | integer | YES | - | 従業員ID（スナップショット） |
+| shift_date | date | NO | - | シフト日付（スナップショット） |
+| shift_code | varchar(20) | YES | - | シフトコード（スナップショット） |
+| start_time | time | YES | - | 開始時刻（スナップショット） |
+| end_time | time | YES | - | 終了時刻（スナップショット） |
+| is_holiday | boolean | YES | - | 休日フラグ（スナップショット） |
+| is_paid_leave | boolean | YES | - | 有給休暇フラグ（スナップショット） |
+| is_remote | boolean | YES | - | テレワークフラグ（スナップショット） |
+| change_type | varchar(10) | NO | - | 変更種別（'UPDATE' / 'DELETE'） |
+| version | integer | NO | - | バージョン番号（shift_id毎の連番） |
+| changed_at | timestamp | NO | CURRENT_TIMESTAMP | 変更日時 |
+| note | varchar(255) | YES | - | 変更理由メモ（任意） |
+
+**制約**:
+- PK(id)
+- FK(shift_id → shifts.id) ON DELETE RESTRICT — 履歴がある限りシフトの削除を禁止
+- UNIQUE(shift_id, version) — 同一シフトのバージョン番号は一意
+- INDEX(shift_id, changed_at) — 特定シフトの履歴検索用
+- INDEX(employee_id, shift_date) — 従業員・日付での履歴検索用
+
+**トリガー: シフト変更履歴の自動記録**:
+
+`shifts` テーブルへの UPDATE / DELETE 時に、変更前の全カラム値を `shift_change_history` に自動保存する。
+
+```sql
+CREATE OR REPLACE FUNCTION record_shift_change()
+RETURNS TRIGGER AS $$
+DECLARE
+  next_version integer;
+BEGIN
+  -- 次のバージョン番号を取得
+  SELECT COALESCE(MAX(version), 0) + 1 INTO next_version
+  FROM shift_change_history
+  WHERE shift_id = OLD.id;
+
+  -- 変更前の値を履歴に記録
+  INSERT INTO shift_change_history (
+    shift_id, employee_id, shift_date, shift_code,
+    start_time, end_time, is_holiday, is_paid_leave, is_remote,
+    change_type, version, changed_at
+  ) VALUES (
+    OLD.id, OLD.employee_id, OLD.shift_date, OLD.shift_code,
+    OLD.start_time, OLD.end_time, OLD.is_holiday, OLD.is_paid_leave, OLD.is_remote,
+    TG_OP, next_version, CURRENT_TIMESTAMP
+  );
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_shift_change_history
+BEFORE UPDATE OR DELETE ON shifts
+FOR EACH ROW
+EXECUTE FUNCTION record_shift_change();
+```
+
+**特定シフトの変更履歴を確認**:
+```sql
+SELECT version, shift_code, start_time, end_time,
+       is_holiday, is_paid_leave, is_remote,
+       change_type, changed_at, note
+FROM shift_change_history
+WHERE shift_id = :対象シフトID
+ORDER BY version DESC;
+```
+
+**変更前後の比較（最新変更）**:
+```sql
+-- 現在値（shiftsテーブル）と直前の値（履歴の最新レコード）を横並びで表示
+SELECT
+  s.shift_code    AS current_code,    h.shift_code    AS previous_code,
+  s.start_time    AS current_start,   h.start_time    AS previous_start,
+  s.end_time      AS current_end,     h.end_time      AS previous_end,
+  s.is_holiday    AS current_holiday, h.is_holiday    AS previous_holiday,
+  s.is_paid_leave AS current_leave,   h.is_paid_leave AS previous_leave,
+  s.is_remote     AS current_remote,  h.is_remote     AS previous_remote,
+  h.changed_at    AS changed_at
+FROM shifts s
+JOIN shift_change_history h ON h.shift_id = s.id
+WHERE s.id = :対象シフトID
+  AND h.version = (SELECT MAX(version) FROM shift_change_history WHERE shift_id = s.id);
+```
+
+**復元（特定バージョンに戻す）**:
+```sql
+UPDATE shifts s SET
+  shift_code    = h.shift_code,
+  start_time    = h.start_time,
+  end_time      = h.end_time,
+  is_holiday    = h.is_holiday,
+  is_paid_leave = h.is_paid_leave,
+  is_remote     = h.is_remote
+FROM shift_change_history h
+WHERE h.shift_id = s.id
+  AND h.shift_id = :対象シフトID
+  AND h.version  = :復元先バージョン;
+-- ※ この UPDATE 自体もトリガーにより履歴に記録される
+```
+
+---
+
+### 8. external_tools（外部ツールマスタ）
 
 外部ツール（CTstage等）を管理する。
 
@@ -327,7 +458,7 @@ ORDER BY g.id, e.id
 
 ---
 
-### 8. employee_external_accounts（従業員外部アカウント）
+### 9. employee_external_accounts（従業員外部アカウント）
 
 従業員と外部ツールアカウントの紐付けを管理する。
 
@@ -347,7 +478,7 @@ ORDER BY g.id, e.id
 ## リレーション
 
 ```
-groups (1) ────< (N) employees (1) ────< (N) shifts
+groups (1) ────< (N) employees (1) ────< (N) shifts (1) ────< (N) shift_change_history
                          │
                          ├────< (N) employee_function_roles >────(N) function_roles
                          │
@@ -363,6 +494,7 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 | employees | employee_function_roles | employee_id | 1:N |
 | function_roles | employee_function_roles | function_role_id | 1:N |
 | employees | employee_name_history | employee_id | 1:N |
+| shifts | shift_change_history | shift_id | 1:N |
 | employees | employee_external_accounts | employee_id | 1:N |
 | external_tools | employee_external_accounts | external_tool_id | 1:N |
 
@@ -380,3 +512,4 @@ groups (1) ────< (N) employees (1) ────< (N) shifts
 | v6 | 2026-02-05 | employee_name_history（従業員氏名履歴）テーブルを追加。EXCLUDE制約による期間重複禁止を含む。テーブル一覧のレコード数を最新化 |
 | v7 | 2026-02-07 | SV管理をfunction_rolesに統合。function_roles.role_type追加（FUNCTION/AUTHORITY分類）。employee_function_roles.role_type追加（非正規化）とカテゴリ重複防止制約。role_type自動設定トリガー追加。employees.is_svを削除 |
 | v8 | 2026-02-16 | positionsマスターをfunction_rolesに統合。role_typeにPOSITION追加（FUNCTION/AUTHORITY/POSITIONの3分類）。employees.position_idを削除。positionsテーブルを廃止。employee_name_historyのカラムをemployeesと整合（name/name_kanaに統一） |
+| v9 | 2026-02-16 | shift_change_history（シフト変更履歴）テーブルを追加。スナップショット型履歴でshiftsへのUPDATE/DELETE時にトリガーで変更前の値を自動記録。バージョン管理・変更前後比較・復元クエリを含む |
